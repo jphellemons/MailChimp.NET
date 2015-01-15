@@ -11,8 +11,9 @@ using MailChimp.Lists;
 using MailChimp.Reports;
 using MailChimp.Templates;
 using MailChimp.Users;
-using ServiceStack.Text;
 using System.IO;
+using Newtonsoft.Json;
+using System.Net;
 
 
 namespace MailChimp
@@ -3248,25 +3249,53 @@ namespace MailChimp
             //  Initialize the results to return:
             T results = default(T);
 
-						using (JsConfig.With(excludeTypeInfo: true, alwaysUseUtc: true)) {
-							try {
-								//  Call the API with the passed arguments:
-								var resultString = fullUrl.PostJsonToUrl(args);
-								results = resultString.Trim().FromJson<T>();
-							} catch (Exception ex) {
-								string errorBody = ex.GetResponseBody();
-								if (errorBody == null)
-									throw;
-								//  Serialize the error information:
-								ApiError apiError = errorBody.FromJson<ApiError>();
+			try {
+				//  Call the API with the passed arguments:
+                var resultString = PostJsonToUrl(fullUrl, args);
+				results = JsonConvert.DeserializeObject<T>(resultString.Trim());
+            }catch (System.Net.WebException ex) {
+                string errorBody = "";
 
-								//  Throw a new exception based on this information:
-								throw new MailChimpAPIException(apiError.Error, ex, apiError);
-							}
-						}
+                var errorResponse = ((System.Net.HttpWebResponse)ex.Response);
+                using (var reader = new System.IO.StreamReader(errorResponse.GetResponseStream()))
+                {
+                    errorBody = reader.ReadToEnd();
+                }
+								
+				if (errorBody == null)
+					throw;
+				//  Serialize the error information:
+				ApiError apiError = JsonConvert.DeserializeObject<ApiError>(errorBody);
+
+				//  Throw a new exception based on this information:
+				throw new MailChimpAPIException(apiError.Error, ex, apiError);
+			}
 
             //  Return the results
             return results;
+        }
+
+        private string PostJsonToUrl(string baseAddress, object args)
+        {
+            var http = (HttpWebRequest)WebRequest.Create(new Uri(baseAddress));
+            http.Accept = "application/json";
+            http.ContentType = "application/json";
+            http.Method = "POST";
+
+            string parsedContent = JsonConvert.SerializeObject(args);
+            System.Text.ASCIIEncoding encoding = new System.Text.ASCIIEncoding();
+            Byte[] bytes = encoding.GetBytes(parsedContent);
+
+            Stream newStream = http.GetRequestStream();
+            newStream.Write(bytes, 0, bytes.Length);
+            newStream.Close();
+
+            var response = http.GetResponse();
+
+            var stream = response.GetResponseStream();
+            var sr = new StreamReader(stream);
+            var content = sr.ReadToEnd();
+            return content;
         }
 
         #endregion

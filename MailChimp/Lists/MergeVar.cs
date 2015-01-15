@@ -3,8 +3,6 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 
-using ServiceStack.Text;
-
 namespace MailChimp.Lists
 {
     /// <summary>
@@ -233,7 +231,5 @@ namespace MailChimp.Lists
 				});
 			};
 		}
-
-
     }
 }

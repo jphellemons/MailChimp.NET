@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using ServiceStack.Text;
 using MailChimp.Errors;
 using MailChimp.Campaigns;
+using Newtonsoft.Json;
+using System.Net;
+using System.IO;
 
 namespace MailChimp
 {
@@ -61,8 +63,7 @@ namespace MailChimp
 		//  Default constructor
 		public MailChimpExportManager()
 		{
-			// remove "__type" member from ServiceStack.Text JSON Serializer serialized strings
-			JsConfig.ExcludeTypeInfo = true;
+			
 		}
 
 		/// <summary>
@@ -183,14 +184,14 @@ namespace MailChimp
 					{
 						columnString = row.Substring(1, row.Substring(1).IndexOf("\","));			//all between " and ", marks
 						row = row.Substring(row.IndexOf("\",") + 2);								//let's cut that column out of the row string
-						columnString = JsonSerializer.DeserializeFromString<string>(columnString);	// This is to fix unicode characters
+                        columnString = JsonConvert.DeserializeObject<string>(columnString);	// This is to fix unicode characters
 						columnList.Add(columnString);				//let's add that column to list
 					}
 					else if (row.Substring(row.Length - 1).Contains("\""))		//If there's not next column, but at least closing quotation mark (The last column)
 					{
 						columnString = row.Substring(1, row.Substring(1).IndexOf("\""));		//all between " and " marks
 						row = "";						//let's clear the row string
-						columnString = JsonSerializer.DeserializeFromString<string>(columnString);	// This is to fix unicode characters
+                        columnString = JsonConvert.DeserializeObject<string>(columnString);	// This is to fix unicode characters
 						columnList.Add(columnString);				//let's add that column to list
 					}
 				}
@@ -200,14 +201,14 @@ namespace MailChimp
 					{
 						columnString = row.Substring(0, row.IndexOf(","));		//all from start to comma mark
 						row = row.Substring(row.IndexOf(",") + 1);		//let's cut that column out of the row string
-						columnString = JsonSerializer.DeserializeFromString<string>(columnString);	// This is to fix unicode characters
+                        columnString = JsonConvert.DeserializeObject<string>(columnString);	// This is to fix unicode characters
 						columnList.Add(columnString);					//let's add that column to list 
 					}
 					else				//If this is last column
 					{
 						columnString = row;						//save null as string value
 						row = "";							//let's clear the row string
-						columnString = JsonSerializer.DeserializeFromString<string>(columnString);	// This is to fix unicode characters
+                        columnString = JsonConvert.DeserializeObject<string>(columnString);	// This is to fix unicode characters
 						columnList.Add(columnString);					//let's add that column to list
 					}
 				}
@@ -242,15 +243,20 @@ namespace MailChimp
 			try
 			{
 				//  Call the API with the passed arguments:
-				var resultString = fullUrl.PostJsonToUrl(args);
+                var resultString = PostJsonToUrl(fullUrl, args);
                 returnList = ParseExportApiResults(resultString);
 			}
-			catch (Exception ex)
+            catch (WebException ex)
 			{
-				string errorBody = ex.GetResponseBody();
+				string errorBody = "";
 
+                var errorResponse = ((HttpWebResponse)ex.Response);
+                using (var reader = new System.IO.StreamReader(errorResponse.GetResponseStream()))
+                {
+                    errorBody = reader.ReadToEnd();
+                }
 				//  Serialize the error information:
-				ApiError apiError = errorBody.FromJson<ApiError>();
+                ApiError apiError = JsonConvert.DeserializeObject<ApiError>(errorBody);
 
 				//  Throw a new exception based on this information:
 				throw new MailChimpAPIException(apiError.Error, ex, apiError);
@@ -259,6 +265,29 @@ namespace MailChimp
 			//  Return the results
 			return returnList;
 		}
+
+        private string PostJsonToUrl(string baseAddress, object args)
+        {
+            var http = (HttpWebRequest)WebRequest.Create(new Uri(baseAddress));
+            http.Accept = "application/json";
+            http.ContentType = "application/json";
+            http.Method = "POST";
+
+            string parsedContent = JsonConvert.SerializeObject(args);
+            System.Text.ASCIIEncoding encoding = new System.Text.ASCIIEncoding();
+            Byte[] bytes = encoding.GetBytes(parsedContent);
+
+            Stream newStream = http.GetRequestStream();
+            newStream.Write(bytes, 0, bytes.Length);
+            newStream.Close();
+
+            var response = http.GetResponse();
+
+            var stream = response.GetResponseStream();
+            var sr = new StreamReader(stream);
+            var content = sr.ReadToEnd();
+            return content;
+        }
 
 		#endregion
 
